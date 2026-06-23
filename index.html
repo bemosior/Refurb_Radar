@@ -1,1 +1,434 @@
-Hello World!
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+<title>Refurb Radar — Find second-life tech near you</title>
+
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<!-- Tailwind CSS (CDN) -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          forest: {
+            50: '#f1f8f3',
+            100: '#dcefe1',
+            200: '#b9dfc4',
+            300: '#8cc99e',
+            400: '#5cad77',
+            500: '#3a8f59',
+            600: '#287345',
+            700: '#205c39',
+            800: '#1c4a2f',
+            900: '#183d29',
+          }
+        }
+      }
+    }
+  }
+</script>
+
+<style>
+  html, body { height: 100%; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+
+  #map { height: 100%; width: 100%; }
+
+  /* Popup styling overrides */
+  .leaflet-popup-content-wrapper {
+    border-radius: 12px;
+    padding: 0;
+    overflow: hidden;
+  }
+  .leaflet-popup-content {
+    margin: 0;
+    width: 260px !important;
+  }
+  .leaflet-popup-close-button {
+    color: white !important;
+    z-index: 10;
+    font-size: 20px !important;
+    padding: 6px 8px 0 0 !important;
+  }
+
+  .custom-pin {
+    background: #287345;
+    width: 34px;
+    height: 34px;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid white;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  }
+  .custom-pin.closed { background: #6b7280; }
+  .custom-pin span {
+    transform: rotate(45deg);
+    font-size: 16px;
+  }
+
+  .user-dot {
+    width: 16px;
+    height: 16px;
+    background: #2563eb;
+    border: 3px solid white;
+    border-radius: 50%;
+    box-shadow: 0 0 0 4px rgba(37,99,235,0.3);
+  }
+
+  /* Hide scrollbar but keep scroll for the bottom sheet list */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+</style>
+</head>
+
+<body class="bg-gray-50 text-gray-800">
+
+<div class="flex flex-col h-screen w-screen overflow-hidden">
+
+  <!-- Header -->
+  <header class="flex-none bg-forest-800 text-white px-4 py-3 shadow-md z-[1000] flex items-center justify-between">
+    <div>
+      <h1 class="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-forest-400 animate-pulse"></span>
+        Refurb Radar
+      </h1>
+      <p class="text-forest-100 text-xs sm:text-sm">Find second-life tech in your neighborhood.</p>
+    </div>
+    <button id="locateBtn" title="Find my location"
+      class="flex-none bg-forest-600 hover:bg-forest-500 active:bg-forest-700 transition rounded-full p-3 shadow">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M12 2v4M12 18v4M2 12h4M18 12h4"></path>
+      </svg>
+    </button>
+  </header>
+
+  <!-- Search bar -->
+  <div class="flex-none bg-white px-4 py-2.5 border-b border-gray-200 z-[999] shadow-sm">
+    <div class="relative">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"></circle>
+        <path d="m21 21-4.35-4.35"></path>
+      </svg>
+      <input id="searchInput" type="text" placeholder="Search by city or item (e.g. MacBook)..."
+        class="w-full pl-9 pr-9 py-2.5 rounded-full bg-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-forest-500 placeholder-gray-400" />
+      <button id="clearSearch" class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6 6 18M6 6l12 12"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Map + bottom sheet -->
+  <div class="relative flex-1 min-h-0">
+    <div id="map"></div>
+
+    <!-- Result count chip -->
+    <div id="resultChip" class="absolute top-3 left-1/2 -translate-x-1/2 z-[998] bg-white/95 backdrop-blur px-3 py-1 rounded-full text-xs font-medium text-gray-600 shadow hidden">
+      <span id="resultCount">0</span> centers found
+    </div>
+
+    <!-- Bottom sheet list (mobile-friendly) -->
+    <div class="absolute bottom-0 left-0 right-0 z-[998] pointer-events-none">
+      <div class="pointer-events-auto bg-white rounded-t-2xl shadow-[0_-4px_16px_rgba(0,0,0,0.12)] max-h-[40vh] sm:max-h-[45vh] flex flex-col">
+        <div class="flex-none flex justify-center py-2 cursor-pointer" id="sheetHandle">
+          <div class="w-10 h-1.5 bg-gray-300 rounded-full"></div>
+        </div>
+        <div id="centerList" class="overflow-y-auto no-scrollbar px-3 pb-3 space-y-2"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+  // ---------------------------------------------------------------
+  // Dummy data source — replace with a real API/database later.
+  // ---------------------------------------------------------------
+  const recyclingCenters = [
+    {
+      id: 1,
+      name: "Bay Area E-Cycle",
+      lat: 37.7749,
+      lng: -122.4194,
+      address: "120 Market St, San Francisco, CA",
+      inventory: "3x MacBook Air, Bulk HDMI cables, 2x iPad (4th gen)",
+      phone: "(415) 555-0142",
+      website: "https://example.com/bay-area-ecycle",
+      status: "Open"
+    },
+    {
+      id: 2,
+      name: "GreenByte Recyclers",
+      lat: 37.8044,
+      lng: -122.2712,
+      address: "455 Telegraph Ave, Oakland, CA",
+      inventory: "5x Dell Latitude laptops, Assorted chargers, 1x 27in monitor",
+      phone: "(510) 555-0199",
+      website: "https://example.com/greenbyte",
+      status: "Open"
+    },
+    {
+      id: 3,
+      name: "SecondLife Computers",
+      lat: 37.6879,
+      lng: -122.4702,
+      address: "88 El Camino Real, Daly City, CA",
+      inventory: "2x MacBook Pro 13in, Refurbished routers, USB-C hubs",
+      phone: "(650) 555-0117",
+      website: "https://example.com/secondlife-computers",
+      status: "Closed"
+    },
+    {
+      id: 4,
+      name: "Circuit Renewal Co.",
+      lat: 37.5630,
+      lng: -122.3255,
+      address: "900 Industrial Way, San Mateo, CA",
+      inventory: "Bulk RAM sticks, 4x ThinkPad T480, Power supplies",
+      phone: "(650) 555-0188",
+      website: "https://example.com/circuit-renewal",
+      status: "Open"
+    },
+    {
+      id: 5,
+      name: "EcoTech Trade-In Hub",
+      lat: 37.3382,
+      lng: -121.8863,
+      address: "300 First St, San Jose, CA",
+      inventory: "6x Chromebooks, 1x iMac 21in, Bluetooth keyboards",
+      phone: "(408) 555-0163",
+      website: "https://example.com/ecotech-tradein",
+      status: "Open"
+    },
+    {
+      id: 6,
+      name: "Refresh Electronics Depot",
+      lat: 37.9101,
+      lng: -122.0652,
+      address: "77 Civic Dr, Walnut Creek, CA",
+      inventory: "3x Surface laptops, Networking switches, Webcams",
+      phone: "(925) 555-0124",
+      website: "https://example.com/refresh-depot",
+      status: "Closed"
+    },
+    {
+      id: 7,
+      name: "Renew Tech Exchange",
+      lat: 37.4419,
+      lng: -122.1430,
+      address: "210 University Ave, Palo Alto, CA",
+      inventory: "2x MacBook Air M1, Bulk HDMI/USB cables, Tablets",
+      phone: "(650) 555-0155",
+      website: "https://example.com/renew-tech",
+      status: "Open"
+    }
+  ];
+
+  // ---------------------------------------------------------------
+  // Map setup
+  // ---------------------------------------------------------------
+  const DEFAULT_CENTER = [37.7749, -122.4194]; // San Francisco fallback
+  const map = L.map('map', { zoomControl: false }).setView(DEFAULT_CENTER, 10);
+
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  function pinIcon(status) {
+    return L.divIcon({
+      className: '',
+      html: `<div class="custom-pin ${status === 'Closed' ? 'closed' : ''}"><span>♻️</span></div>`,
+      iconSize: [34, 34],
+      iconAnchor: [17, 30],
+      popupAnchor: [0, -28]
+    });
+  }
+
+  function popupHtml(center) {
+    const statusBadge = center.status === 'Open'
+      ? `<span class="inline-block bg-forest-100 text-forest-700 text-xs font-semibold px-2 py-0.5 rounded-full">Open</span>`
+      : `<span class="inline-block bg-gray-200 text-gray-600 text-xs font-semibold px-2 py-0.5 rounded-full">Closed</span>`;
+
+    const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${center.lat},${center.lng}`;
+
+    return `
+      <div>
+        <div class="bg-forest-700 text-white px-4 py-3">
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="font-bold text-sm leading-tight pr-4">${center.name}</h3>
+          </div>
+          <div class="mt-1">${statusBadge}</div>
+        </div>
+        <div class="px-4 py-3 space-y-2 text-sm">
+          <p class="text-gray-600 flex gap-1.5">
+            <span>📍</span><span>${center.address}</span>
+          </p>
+          <div>
+            <p class="font-semibold text-gray-700 text-xs uppercase tracking-wide mb-0.5">Current Inventory</p>
+            <p class="text-gray-600">${center.inventory}</p>
+          </div>
+          <div class="flex flex-col gap-0.5 text-gray-600">
+            <a href="tel:${center.phone.replace(/[^\d+]/g, '')}" class="hover:text-forest-700">📞 ${center.phone}</a>
+            <a href="${center.website}" target="_blank" rel="noopener" class="hover:text-forest-700 truncate">🌐 Visit website</a>
+          </div>
+          <a href="${directionsUrl}" target="_blank" rel="noopener"
+            class="mt-2 block w-full text-center bg-forest-600 hover:bg-forest-500 active:bg-forest-700 text-white font-semibold py-2.5 rounded-full text-sm transition">
+            Get Directions
+          </a>
+        </div>
+      </div>
+    `;
+  }
+
+  const markers = {};
+  recyclingCenters.forEach(center => {
+    const marker = L.marker([center.lat, center.lng], { icon: pinIcon(center.status) })
+      .addTo(map)
+      .bindPopup(popupHtml(center));
+    markers[center.id] = marker;
+  });
+
+  // ---------------------------------------------------------------
+  // Geolocation
+  // ---------------------------------------------------------------
+  let userMarker = null;
+
+  function locateUser(showAlertOnError) {
+    if (!navigator.geolocation) {
+      if (showAlertOnError) alert('Geolocation is not supported by your browser.');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        map.setView([latitude, longitude], 12);
+
+        if (userMarker) {
+          userMarker.setLatLng([latitude, longitude]);
+        } else {
+          userMarker = L.marker([latitude, longitude], {
+            icon: L.divIcon({ className: '', html: '<div class="user-dot"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
+            zIndexOffset: 1000
+          }).addTo(map).bindPopup('You are here');
+        }
+      },
+      (err) => {
+        if (showAlertOnError) alert('Could not get your location: ' + err.message);
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }
+
+  // Auto-locate on load (silent if denied), manual retry via button
+  locateUser(false);
+  document.getElementById('locateBtn').addEventListener('click', () => locateUser(true));
+
+  // ---------------------------------------------------------------
+  // List + search/filter
+  // ---------------------------------------------------------------
+  const listEl = document.getElementById('centerList');
+  const searchInput = document.getElementById('searchInput');
+  const clearSearchBtn = document.getElementById('clearSearch');
+  const resultChip = document.getElementById('resultChip');
+  const resultCount = document.getElementById('resultCount');
+
+  function renderList(items) {
+    listEl.innerHTML = '';
+
+    if (items.length === 0) {
+      listEl.innerHTML = `<p class="text-center text-gray-400 text-sm py-6">No centers match your search.</p>`;
+      return;
+    }
+
+    items.forEach(center => {
+      const card = document.createElement('button');
+      card.className = 'w-full text-left bg-gray-50 hover:bg-forest-50 active:bg-forest-100 rounded-xl px-3.5 py-3 flex items-center gap-3 transition border border-gray-100';
+      card.innerHTML = `
+        <div class="flex-none w-10 h-10 rounded-full bg-forest-700 text-white flex items-center justify-center text-lg">♻️</div>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2">
+            <p class="font-semibold text-sm text-gray-800 truncate">${center.name}</p>
+            ${center.status === 'Open'
+              ? '<span class="flex-none text-[10px] font-semibold text-forest-700 bg-forest-100 px-1.5 py-0.5 rounded-full">Open</span>'
+              : '<span class="flex-none text-[10px] font-semibold text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded-full">Closed</span>'}
+          </div>
+          <p class="text-xs text-gray-500 truncate">${center.address}</p>
+          <p class="text-xs text-gray-400 truncate mt-0.5">${center.inventory}</p>
+        </div>
+      `;
+      card.addEventListener('click', () => {
+        map.setView([center.lat, center.lng], 14, { animate: true });
+        markers[center.id].openPopup();
+      });
+      listEl.appendChild(card);
+    });
+  }
+
+  function applyFilter() {
+    const q = searchInput.value.trim().toLowerCase();
+    clearSearchBtn.classList.toggle('hidden', q.length === 0);
+
+    const filtered = q.length === 0
+      ? recyclingCenters
+      : recyclingCenters.filter(c =>
+          c.name.toLowerCase().includes(q) ||
+          c.address.toLowerCase().includes(q) ||
+          c.inventory.toLowerCase().includes(q)
+        );
+
+    renderList(filtered);
+
+    // Toggle map markers to match filter
+    recyclingCenters.forEach(c => {
+      const onMap = filtered.includes(c);
+      const marker = markers[c.id];
+      if (onMap && !map.hasLayer(marker)) marker.addTo(map);
+      if (!onMap && map.hasLayer(marker)) map.removeLayer(marker);
+    });
+
+    if (q.length > 0) {
+      resultChip.classList.remove('hidden');
+      resultCount.textContent = filtered.length;
+    } else {
+      resultChip.classList.add('hidden');
+    }
+  }
+
+  searchInput.addEventListener('input', applyFilter);
+  clearSearchBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    applyFilter();
+    searchInput.focus();
+  });
+
+  renderList(recyclingCenters);
+
+  // ---------------------------------------------------------------
+  // Bottom sheet drag-to-collapse (simple toggle on handle tap)
+  // ---------------------------------------------------------------
+  const sheetHandle = document.getElementById('sheetHandle');
+  const sheet = sheetHandle.parentElement;
+  let collapsed = false;
+  sheetHandle.addEventListener('click', () => {
+    collapsed = !collapsed;
+    sheet.style.transform = collapsed ? 'translateY(calc(100% - 28px))' : 'translateY(0)';
+    sheet.style.transition = 'transform 0.25s ease';
+  });
+</script>
+
+</body>
+</html>
